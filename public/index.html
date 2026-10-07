@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="종목 이름이나 코드를 입력하면 일별 종가 흐름과 기술적 지표를 요약해 보여주는 분석 도구" />
+    <title>Stock Lens · 종목 분석</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#analysis">분석 결과로 건너뛰기</a>
+
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Stock Lens 홈">
+        <span class="brand-mark" aria-hidden="true">
+          <span class="brand-bar brand-bar-one"></span>
+          <span class="brand-bar brand-bar-two"></span>
+          <span class="brand-bar brand-bar-three"></span>
+          <span class="brand-line"></span>
+        </span>
+        <span>
+          <strong>Stock Lens</strong>
+        </span>
+      </a>
+      <div class="header-tools">
+        <span id="market-status" class="data-badge market-status market-unknown"><span class="status-dot" aria-hidden="true"></span><span id="market-status-text">시장 상태 확인 중</span></span>
+        <div class="theme-switcher" role="group" aria-label="화면 테마 선택">
+          <button class="theme-option" type="button" data-theme-choice="light" aria-pressed="true">
+            <span aria-hidden="true">☼</span> 라이트
+          </button>
+          <button class="theme-option" type="button" data-theme-choice="dark" aria-pressed="false">
+            <span aria-hidden="true">◐</span> 다크
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main class="page-shell">
+      <section class="hero" aria-labelledby="page-title">
+        <div class="hero-copy">
+          <h1 id="page-title">종목을 입력하면,<br /><em>흐름이 보입니다.</em></h1>
+          <p class="hero-description">현재가와 가격 흐름, 핵심 지표를 한 화면에서 확인하세요.</p>
+        </div>
+
+        <form id="analyze-form" class="search-form" role="search" novalidate>
+          <label for="symbol">종목 이름 또는 코드</label>
+          <div class="search-row">
+            <input
+              id="symbol"
+              name="symbol"
+              type="text"
+              value="삼성전자"
+              placeholder="예: 삼성전자"
+              autocomplete="off"
+              spellcheck="false"
+              autocapitalize="characters"
+              aria-describedby="symbol-help"
+              aria-controls="symbol-suggestions"
+              aria-autocomplete="list"
+              aria-expanded="false"
+              required
+            />
+            <button id="analyze-button" type="submit">
+              <span>분석 시작</span>
+              <span class="button-arrow" aria-hidden="true">↗</span>
+            </button>
+          </div>
+          <div id="symbol-suggestions" class="suggestions" role="listbox" aria-label="종목 검색 결과" aria-busy="false" hidden></div>
+          <div class="quick-picks" aria-label="예시 종목">
+            <button type="button" class="quick-pick" data-symbol="삼성전자">삼성전자</button>
+            <button type="button" class="quick-pick" data-symbol="SK하이닉스">SK하이닉스</button>
+            <button type="button" class="quick-pick" data-symbol="애플">애플</button>
+          </div>
+          <p id="symbol-help" class="field-help">종목 이름 또는 코드를 입력하세요.</p>
+        </form>
+      </section>
+
+      <section id="analysis" class="analysis-section" aria-labelledby="analysis-title" aria-live="polite" aria-busy="false">
+        <div id="empty-state" class="empty-state">
+          <div class="empty-orbit" aria-hidden="true"><span></span><span></span><span></span></div>
+          <h2 id="analysis-title">분석할 종목을 입력하세요.</h2>
+          <p>분석 결과가 이곳에 표시됩니다.</p>
+        </div>
+
+        <div id="loading-state" class="state-panel" hidden>
+          <span class="loader" aria-hidden="true"></span>
+          <div>
+            <h2>가격 흐름을 읽고 있습니다.</h2>
+            <p>시세 데이터를 가져오는 중입니다.</p>
+          </div>
+        </div>
+
+        <div id="error-state" class="state-panel error-panel" role="alert" hidden>
+          <span class="error-icon" aria-hidden="true">!</span>
+          <div>
+            <h2>분석을 완료하지 못했습니다.</h2>
+            <p id="error-message">종목 이름과 데이터 공급원 상태를 확인해 주세요.</p>
+          </div>
+        </div>
+
+        <div id="results" hidden>
+          <div class="result-heading">
+            <div>
+              <h2><span id="result-symbol">AAPL.US</span></h2>
+            </div>
+            <p class="as-of">기준일 <strong id="as-of-date">—</strong><br /><span id="source-label">토스증권 일별 종가</span></p>
+          </div>
+
+          <div class="metrics-grid" aria-label="핵심 지표">
+            <article class="metric-card metric-primary">
+              <p id="metric-label-latest">최근 종가</p>
+              <strong id="latest-price">—</strong>
+              <span id="latest-date">—</span>
+            </article>
+            <article class="metric-card">
+              <p id="metric-label-one-day">1일 변화</p>
+              <strong id="one-day-change">—</strong>
+              <span id="metric-hint-one-day">전일 종가 대비</span>
+            </article>
+            <article class="metric-card">
+              <p id="metric-label-one-month">1개월 수익률</p>
+              <strong id="one-month-return">—</strong>
+              <span id="metric-hint-one-month">약 21거래일</span>
+            </article>
+            <article class="metric-card">
+              <p id="metric-label-three-month">3개월 수익률</p>
+              <strong id="three-month-return">—</strong>
+              <span id="metric-hint-three-month">약 63거래일</span>
+            </article>
+          </div>
+
+          <div class="analysis-grid">
+            <article class="panel chart-panel">
+              <div class="panel-heading">
+                <div>
+                  <h3>최근 가격 흐름</h3>
+                </div>
+                <div class="chart-meta">
+                  <div class="chart-tabs" role="group" aria-label="차트 시간 단위">
+                    <button type="button" class="chart-tab" data-chart-mode="day" aria-pressed="false">일봉</button>
+                    <button type="button" class="chart-tab" data-chart-mode="week" aria-pressed="false">주봉</button>
+                    <button type="button" class="chart-tab" data-chart-mode="month" aria-pressed="false">월봉</button>
+                    <button type="button" class="chart-tab" data-chart-mode="1m" aria-pressed="true">1분</button>
+                    <button type="button" class="chart-tab" data-chart-mode="3m" aria-pressed="false">3분</button>
+                    <button type="button" class="chart-tab" data-chart-mode="5m" aria-pressed="false">5분</button>
+                    <button type="button" class="chart-tab" data-chart-mode="10m" aria-pressed="false">10분</button>
+                    <button type="button" class="chart-tab" data-chart-mode="30m" aria-pressed="false">30분</button>
+                  </div>
+                  <span id="chart-window" class="panel-note">실시간 연결 대기</span>
+                </div>
+              </div>
+              <div id="price-chart" class="price-chart" role="img" aria-label="종가 흐름 차트"></div>
+              <div class="chart-footer"><span id="chart-start">—</span><span id="chart-end">—</span></div>
+            </article>
+
+            <aside class="panel reading-panel">
+              <div class="signal-header">
+                <h3>현재 기울기</h3>
+                <span id="trend-badge" class="trend-badge">—</span>
+              </div>
+              <p id="trend-copy" class="reading-copy">—</p>
+              <div class="signal-list" aria-label="기술적 관찰">
+                <div class="signal-row"><span id="signal-label-ma20">20일 평균</span><strong id="ma20">—</strong></div>
+                <div class="signal-row"><span id="signal-label-ma50">50일 평균</span><strong id="ma50">—</strong></div>
+                <div class="signal-row"><span id="signal-label-volatility">연환산 변동성</span><strong id="volatility">—</strong></div>
+                <div class="signal-row"><span id="signal-label-drawdown">최대 낙폭</span><strong id="max-drawdown">—</strong></div>
+              </div>
+            </aside>
+          </div>
+
+          <article class="panel notes-panel">
+            <div class="notes-heading">
+              <h3>숫자에서 읽을 수 있는 것</h3>
+            </div>
+            <ul id="observation-list" class="observation-list"></ul>
+          </article>
+
+          <p class="disclaimer">토스증권 시세 데이터를 바탕으로 한 요약이며 투자 권유나 수익을 보장하지 않습니다.</p>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

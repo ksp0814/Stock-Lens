@@ -1,0 +1,11 @@
+{
+  "name": "stock-lens",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file=.env.local src/server.js",
+    "start:prod": "node src/server.js",
+    "test": "node --test"
+  }
+}
