@@ -3,8 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="종목 이름이나 코드를 입력하면 일별 종가 흐름과 기술적 지표를 요약해 보여주는 분석 도구" />
-    <title>Stock Lens · 종목 분석</title>
+    <meta name="description" content="종목의 추세, 위험도, 가격 흐름을 한 화면에서 확인하는 의사결정 대시보드" />
+    <title>Stock Lens · 의사결정 대시보드</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -19,6 +19,7 @@
           <span class="brand-line"></span>
         </span>
         <span>
+          <span class="brand-kicker">DECISION DASHBOARD</span>
           <strong>Stock Lens</strong>
         </span>
       </a>
@@ -38,8 +39,9 @@
     <main class="page-shell">
       <section class="hero" aria-labelledby="page-title">
         <div class="hero-copy">
-          <h1 id="page-title">종목을 입력하면,<br /><em>흐름이 보입니다.</em></h1>
-          <p class="hero-description">현재가와 가격 흐름, 핵심 지표를 한 화면에서 확인하세요.</p>
+          <p class="eyebrow">의사결정 대시보드</p>
+          <h1 id="page-title">종목의 흐름과<br /><em>판단 근거를 봅니다.</em></h1>
+          <p class="hero-description">추세·위험도·가격 흐름을 한 화면에서 비교하세요.</p>
         </div>
 
         <form id="analyze-form" class="search-form" role="search" novalidate>
@@ -106,6 +108,24 @@
             <p class="as-of">기준일 <strong id="as-of-date">—</strong><br /><span id="source-label">토스증권 일별 종가</span></p>
           </div>
 
+          <article class="decision-panel" aria-labelledby="decision-title">
+            <div class="decision-heading">
+              <div>
+                <p class="eyebrow">DECISION SNAPSHOT</p>
+                <h3 id="decision-title">판단 스냅샷</h3>
+              </div>
+              <span id="decision-badge" class="decision-badge">—</span>
+            </div>
+            <p id="decision-copy" class="decision-copy">추세와 위험도 계산 결과가 이곳에 표시됩니다.</p>
+            <div class="decision-facts" aria-label="판단 기준">
+              <div class="decision-fact"><span id="decision-trend-label">추세</span><strong id="decision-trend">—</strong></div>
+              <div class="decision-fact"><span id="decision-risk-label">위험도</span><strong id="decision-risk">—</strong></div>
+              <div class="decision-fact"><span>시장</span><strong id="decision-market">확인 중</strong></div>
+              <div class="decision-fact"><span>기준</span><strong id="decision-as-of">—</strong></div>
+            </div>
+            <p class="decision-footnote">지표 기반 참고 정보이며 투자 권유나 수익을 보장하지 않습니다.</p>
+          </article>
+
           <div class="metrics-grid" aria-label="핵심 지표">
             <article class="metric-card metric-primary">
               <p id="metric-label-latest">최근 종가</p>
@@ -155,7 +175,7 @@
 
             <aside class="panel reading-panel">
               <div class="signal-header">
-                <h3>현재 기울기</h3>
+                <h3>기술적 근거</h3>
                 <span id="trend-badge" class="trend-badge">—</span>
               </div>
               <p id="trend-copy" class="reading-copy">—</p>

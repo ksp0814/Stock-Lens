@@ -20,6 +20,7 @@ let activePayload = null;
 let activeChartMode = 'day';
 let liveTimer = null;
 let liveRequestId = 0;
+let activeMarketStatus = null;
 
 function getInitialTheme() {
   try {
@@ -84,7 +85,14 @@ const elements = {
   priceChart: document.querySelector('#price-chart'),
   chartWindow: document.querySelector('#chart-window'),
   chartStart: document.querySelector('#chart-start'),
-  chartEnd: document.querySelector('#chart-end')
+  chartEnd: document.querySelector('#chart-end'),
+  decisionBadge: document.querySelector('#decision-badge'),
+  decisionCopy: document.querySelector('#decision-copy'),
+  decisionTrend: document.querySelector('#decision-trend'),
+  decisionRiskLabel: document.querySelector('#decision-risk-label'),
+  decisionRisk: document.querySelector('#decision-risk'),
+  decisionMarket: document.querySelector('#decision-market'),
+  decisionAsOf: document.querySelector('#decision-as-of')
 };
 
 function formatNumber(value) {
@@ -135,8 +143,11 @@ function setMetric(element, value, formatter = formatNumber) {
 
 function renderMarketStatus(status) {
   const safeStatus = status?.status ?? 'unknown';
+  const safeLabel = status?.label ?? '시장 상태 확인 불가';
+  activeMarketStatus = { status: safeStatus, label: safeLabel };
   elements.marketStatus.className = `data-badge market-status market-${safeStatus}`;
-  elements.marketStatusText.textContent = status?.label ?? '시장 상태 확인 불가';
+  elements.marketStatusText.textContent = safeLabel;
+  elements.decisionMarket.textContent = safeLabel;
 }
 
 function hideSuggestions() {
@@ -287,8 +298,8 @@ function getChartGeometry(history) {
   return { width, height, padding, priceBottom, volumeTop, volumeBottom, min, max, coordinates, candles };
 }
 
-function makeChart(history) {
-  const { width, height, padding, priceBottom, volumeTop, volumeBottom, min, max, coordinates, candles } = getChartGeometry(history);
+function makeChart(history, geometry = getChartGeometry(history)) {
+  const { width, height, padding, priceBottom, volumeTop, volumeBottom, min, max, coordinates, candles } = geometry;
   const candleWidth = Math.max(1.2, Math.min(8, ((width - padding.left - padding.right) / Math.max(history.length, 1)) * .62));
   const candleMarkup = candles.map((candle) => {
     const bodyTop = Math.min(candle.openY, candle.closeY);
@@ -315,7 +326,7 @@ function makeChart(history) {
     </svg>`;
 }
 
-function bindChartTooltip(history) {
+function bindChartTooltip(history, geometry = getChartGeometry(history)) {
   const svg = elements.priceChart.querySelector('svg');
   const catcher = elements.priceChart.querySelector('.chart-hover-catcher');
   const hoverLine = elements.priceChart.querySelector('.chart-hover-line');
@@ -335,7 +346,6 @@ function bindChartTooltip(history) {
   tooltip.append(tooltipDate, tooltipPrice, tooltipDetails, tooltipVolume);
   elements.priceChart.append(tooltip);
 
-  const geometry = getChartGeometry(history);
   const hide = () => {
     tooltip.hidden = true;
     hoverLine.setAttribute('visibility', 'hidden');
@@ -377,8 +387,9 @@ function chartDateLabel(value) {
 function renderChartHistory(history, mode) {
   if (!history?.length) return;
 
-  elements.priceChart.innerHTML = makeChart(history);
-  bindChartTooltip(history);
+  const geometry = getChartGeometry(history);
+  elements.priceChart.innerHTML = makeChart(history, geometry);
+  bindChartTooltip(history, geometry);
   elements.priceChart.setAttribute('aria-label', `${activePayload.symbol.toUpperCase()} ${mode} 종가 흐름`);
   elements.chartStart.textContent = chartDateLabel(history[0].date);
   elements.chartEnd.textContent = chartDateLabel(history.at(-1).date);
@@ -448,8 +459,30 @@ function setTrend(trend, live = false) {
       : '단기와 중기 신호가 한 방향으로 모이지 않았습니다. 수익률 하나만으로 방향을 단정하지 마세요.';
 }
 
+function setDecisionSummary({ trend, riskLabel, riskValue, asOf, live = false }) {
+  const tone = trend === '상승 추세' ? 'decision-up' : trend === '하락 추세' ? 'decision-down' : 'decision-flat';
+  elements.decisionBadge.textContent = live ? '실시간 관찰' : trend;
+  elements.decisionBadge.className = `decision-badge ${live ? 'decision-live' : tone}`;
+  elements.decisionTrend.textContent = trend;
+  elements.decisionRiskLabel.textContent = riskLabel;
+  elements.decisionRisk.textContent = riskValue;
+  elements.decisionMarket.textContent = activeMarketStatus?.label ?? '확인 중';
+  elements.decisionAsOf.textContent = asOf ?? '—';
+
+  if (live) {
+    elements.decisionCopy.textContent = '실시간 분봉 관찰입니다. 오늘 변화·VWAP 괴리·분봉 변동성을 함께 확인하세요.';
+    return;
+  }
+
+  elements.decisionCopy.textContent = trend === '상승 추세'
+    ? `상승 신호가 이어지고 있습니다. 위험도 ${riskValue}이며, 이동평균과 낙폭을 함께 확인하세요.`
+    : trend === '하락 추세'
+      ? `하락 신호가 이어지고 있습니다. 위험도 ${riskValue}이며, 변동성과 낙폭 변화를 먼저 확인하세요.`
+      : `추세 신호가 엇갈립니다. 위험도 ${riskValue}이며, 수익률 하나로 방향을 단정하지 마세요.`;
+}
+
 function renderDailyMetrics(data, source = 'Toss Securities') {
-  const { latest, periods, movingAverages, volatilityAnnualized, maxDrawdown, trend } = data;
+  const { latest, periods, movingAverages, volatilityAnnualized, maxDrawdown, trend, riskLevel } = data;
   elements.sourceLabel.textContent = `${source} 일별 종가`;
   elements.metricLabelLatest.textContent = '최근 종가';
   elements.metricLabelOneDay.textContent = '1일 변화';
@@ -472,6 +505,7 @@ function renderDailyMetrics(data, source = 'Toss Securities') {
   elements.volatility.textContent = formatPercent(volatilityAnnualized);
   elements.maxDrawdown.textContent = formatPercent(maxDrawdown);
   setTrend(trend);
+  setDecisionSummary({ trend, riskLabel: '위험도', riskValue: riskLevel, asOf: latest.date });
 }
 
 function renderLiveMetrics(data) {
@@ -499,6 +533,13 @@ function renderLiveMetrics(data) {
   elements.volatility.textContent = formatPercent(volatility);
   elements.maxDrawdown.textContent = formatPercent(maxDrawdown);
   setTrend(trend, true);
+  setDecisionSummary({
+    trend,
+    riskLabel: '분봉 변동성',
+    riskValue: formatPercent(volatility),
+    asOf: latest.date.slice(0, 16).replace('T', ' '),
+    live: true
+  });
 }
 
 function renderObservationItems(observations) {
@@ -543,6 +584,8 @@ function renderResults(payload) {
   elements.asOfDate.textContent = asOf;
   elements.sourceLabel.textContent = `${source} 분석 대기`;
   activePayload = payload;
+  activeMarketStatus = null;
+  renderMarketStatus({ status: 'unknown', label: '시장 상태 확인 중' });
   renderDailyMetrics(data, source);
   renderObservations(data);
   selectChartMode('1m');
