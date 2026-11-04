@@ -1,5 +1,6 @@
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
+import { isIP } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { analyzeIntraday, analyzePrices } from './analysis.js';
@@ -32,28 +33,49 @@ function writeJson(response, status, body, headers = {}) {
   response.end(JSON.stringify(body));
 }
 
-function getClientAddress(request) {
-  const forwardedFor = request.headers['x-forwarded-for'];
-  if (typeof forwardedFor === 'string' && forwardedFor.trim()) {
-    return forwardedFor.split(',')[0].trim();
-  }
-  return request.socket.remoteAddress ?? 'unknown';
+function normalizeIp(address) {
+  const mapped = address.startsWith('::ffff:') ? address.slice(7) : address;
+  return isIP(mapped) ? mapped : address;
 }
 
-function checkRateLimit(request, pathname, buckets) {
+function parseTrustedProxyIps(value) {
+  const addresses = value.split(',').map((address) => normalizeIp(address.trim())).filter(Boolean);
+  if (addresses.some((address) => !isIP(address))) {
+    throw new Error('TRUSTED_PROXY_IPS에는 쉼표로 구분한 IP 주소만 입력해 주세요.');
+  }
+  return new Set(addresses);
+}
+
+function getClientAddress(request, trustedProxyIps) {
+  const directAddress = normalizeIp(request.socket.remoteAddress ?? 'unknown');
+  if (!trustedProxyIps.has(directAddress)) return directAddress;
+
+  const forwardedFor = request.headers['x-forwarded-for'];
+  if (typeof forwardedFor === 'string') {
+    const addresses = forwardedFor.split(',').map((address) => normalizeIp(address.trim()));
+    for (let index = addresses.length - 1; index >= 0; index -= 1) {
+      if (!isIP(addresses[index])) return directAddress;
+      if (!trustedProxyIps.has(addresses[index])) return addresses[index];
+    }
+  }
+  return directAddress;
+}
+
+function checkRateLimit(request, pathname, limiter, trustedProxyIps) {
   const limit = API_RATE_LIMITS[pathname];
   if (!limit) return null;
 
   const now = Date.now();
-  if (buckets.size > 5_000) {
-    for (const [key, bucket] of buckets) {
-      if (bucket.resetAt <= now) buckets.delete(key);
+  if (now >= limiter.nextCleanupAt) {
+    for (const [key, bucket] of limiter.buckets) {
+      if (bucket.resetAt <= now) limiter.buckets.delete(key);
     }
+    limiter.nextCleanupAt = now + RATE_LIMIT_WINDOW_MS;
   }
-  const key = `${pathname}:${getClientAddress(request)}`;
-  const current = buckets.get(key);
+  const key = `${pathname}:${getClientAddress(request, trustedProxyIps)}`;
+  const current = limiter.buckets.get(key);
   if (!current || current.resetAt <= now) {
-    buckets.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    limiter.buckets.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
     return null;
   }
   if (current.count >= limit) return Math.ceil((current.resetAt - now) / 1000);
@@ -97,11 +119,13 @@ async function serveStatic(response, pathname, publicDir) {
 export function createServer({
   fetchImpl = globalThis.fetch,
   publicDir = defaultPublicDir,
-  marketClient = createTossInvestClient({ fetchImpl })
+  marketClient = createTossInvestClient({ fetchImpl }),
+  trustedProxyIps = process.env.TRUSTED_PROXY_IPS ?? ''
 } = {}) {
+  const trustedProxies = parseTrustedProxyIps(trustedProxyIps);
   const chartCache = new Map();
   const chartInflight = new Map();
-  const rateLimitBuckets = new Map();
+  const rateLimiter = { buckets: new Map(), nextCleanupAt: Date.now() + RATE_LIMIT_WINDOW_MS };
 
   return http.createServer(async (request, response) => {
     const requestUrl = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
@@ -112,7 +136,7 @@ export function createServer({
     }
 
     if (requestUrl.pathname.startsWith('/api/')) {
-      const retryAfter = checkRateLimit(request, requestUrl.pathname, rateLimitBuckets);
+      const retryAfter = checkRateLimit(request, requestUrl.pathname, rateLimiter, trustedProxies);
       if (retryAfter !== null) {
         writeJson(response, 429, { error: '요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.' }, {
           'retry-after': String(retryAfter)

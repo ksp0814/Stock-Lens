@@ -222,3 +222,39 @@ test('rate-limits public API requests per client', async () => {
     assert.ok(responses.some((response) => response.status === 429));
   });
 });
+
+test('ignores untrusted forwarded addresses when applying rate limits', async () => {
+  const server = createServer({ marketClient: { searchStocks: async () => [] } });
+
+  await withServer(server, async (baseUrl) => {
+    const endpoint = `${baseUrl}/api/search?query=삼성`;
+    const responses = await Promise.all(Array.from({ length: 31 }, (_, index) => fetch(endpoint, {
+      headers: { 'x-forwarded-for': `198.51.100.${index + 1}` }
+    })));
+    assert.equal(responses.filter((response) => response.status === 429).length, 1);
+  });
+});
+
+test('uses the nearest untrusted address behind a configured proxy', async () => {
+  const server = createServer({
+    marketClient: { searchStocks: async () => [] },
+    trustedProxyIps: '127.0.0.1'
+  });
+
+  await withServer(server, async (baseUrl) => {
+    const endpoint = `${baseUrl}/api/search?query=삼성`;
+    await Promise.all(Array.from({ length: 30 }, (_, index) => fetch(endpoint, {
+      headers: { 'x-forwarded-for': `192.0.2.${index + 1}, 198.51.100.1` }
+    })));
+    const limited = await fetch(endpoint, {
+      headers: { 'x-forwarded-for': '192.0.2.99, 198.51.100.1' }
+    });
+    const otherClient = await fetch(endpoint, {
+      headers: { 'x-forwarded-for': '192.0.2.99, 198.51.100.2' }
+    });
+    assert.equal(limited.status, 429);
+    assert.equal(otherClient.status, 200);
+  });
+
+  assert.throws(() => createServer({ marketClient: {}, trustedProxyIps: 'invalid' }), /IP 주소/);
+});

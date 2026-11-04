@@ -3,8 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="종목의 추세, 위험도, 가격 흐름을 한 화면에서 확인하는 의사결정 대시보드" />
-    <title>Stock Lens · 의사결정 대시보드</title>
+    <meta name="description" content="국내·미국 종목의 가격 흐름, 수익률, 위험 지표를 한 화면에서 확인하세요." />
+    <title>Stock Lens · 종목 분석</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -19,7 +19,7 @@
           <span class="brand-line"></span>
         </span>
         <span>
-          <span class="brand-kicker">DECISION DASHBOARD</span>
+          <span class="brand-kicker">MARKET WORKSPACE</span>
           <strong>Stock Lens</strong>
         </span>
       </a>
@@ -39,49 +39,59 @@
     <main class="page-shell">
       <section class="hero" aria-labelledby="page-title">
         <div class="hero-copy">
-          <p class="eyebrow">의사결정 대시보드</p>
-          <h1 id="page-title">종목의 흐름과<br /><em>판단 근거를 봅니다.</em></h1>
-          <p class="hero-description">추세·위험도·가격 흐름을 한 화면에서 비교하세요.</p>
+          <p class="eyebrow">STOCK LENS / 01</p>
+          <h1 id="page-title">종목의 흐름을<br /><em>한눈에.</em></h1>
+          <p class="hero-description">가격·수익률·위험 신호를 한곳에서 확인하세요.</p>
         </div>
 
         <form id="analyze-form" class="search-form" role="search" novalidate>
-          <label for="symbol">종목 이름 또는 코드</label>
-          <div class="search-row">
-            <input
-              id="symbol"
-              name="symbol"
-              type="text"
-              value="삼성전자"
-              placeholder="예: 삼성전자"
-              autocomplete="off"
-              spellcheck="false"
-              autocapitalize="characters"
-              aria-describedby="symbol-help"
-              aria-controls="symbol-suggestions"
-              aria-autocomplete="list"
-              aria-expanded="false"
-              required
-            />
-            <button id="analyze-button" type="submit">
-              <span>분석 시작</span>
-              <span class="button-arrow" aria-hidden="true">↗</span>
-            </button>
+          <div class="search-heading">
+            <label for="symbol">종목 찾기</label>
+            <span>KR / US</span>
           </div>
-          <div id="symbol-suggestions" class="suggestions" role="listbox" aria-label="종목 검색 결과" aria-busy="false" hidden></div>
+          <div class="search-control">
+            <div class="search-row">
+              <input
+                id="symbol"
+                name="symbol"
+                type="text"
+                value="삼성전자"
+                placeholder="종목 이름 또는 코드"
+                autocomplete="off"
+                spellcheck="false"
+                autocapitalize="characters"
+                aria-describedby="symbol-help"
+                aria-controls="symbol-suggestions"
+                aria-autocomplete="list"
+                aria-expanded="false"
+                required
+              />
+              <button id="analyze-button" type="submit">
+                <span>분석 시작</span>
+                <span class="button-arrow" aria-hidden="true">↗</span>
+              </button>
+            </div>
+            <div id="symbol-suggestions" class="suggestions" role="listbox" aria-label="종목 검색 결과" aria-busy="false" hidden></div>
+          </div>
           <div class="quick-picks" aria-label="예시 종목">
+            <span class="quick-picks-label">바로 보기</span>
             <button type="button" class="quick-pick" data-symbol="삼성전자">삼성전자</button>
             <button type="button" class="quick-pick" data-symbol="SK하이닉스">SK하이닉스</button>
             <button type="button" class="quick-pick" data-symbol="애플">애플</button>
           </div>
-          <p id="symbol-help" class="field-help">종목 이름 또는 코드를 입력하세요.</p>
+          <p id="symbol-help" class="field-help">국내·미국 종목 이름이나 코드로 검색할 수 있습니다.</p>
         </form>
       </section>
 
       <section id="analysis" class="analysis-section" aria-labelledby="analysis-title" aria-live="polite" aria-busy="false">
         <div id="empty-state" class="empty-state">
-          <div class="empty-orbit" aria-hidden="true"><span></span><span></span><span></span></div>
-          <h2 id="analysis-title">분석할 종목을 입력하세요.</h2>
-          <p>분석 결과가 이곳에 표시됩니다.</p>
+          <span class="empty-index" aria-hidden="true">01</span>
+          <div>
+            <p class="eyebrow">ANALYSIS READY</p>
+            <h2 id="analysis-title">분석할 종목을 선택하세요.</h2>
+            <p>종목의 가격 흐름과 기술적 지표가 이곳에 표시됩니다.</p>
+          </div>
+          <span class="empty-arrow" aria-hidden="true">↗</span>
         </div>
 
         <div id="loading-state" class="state-panel" hidden>
@@ -103,6 +113,7 @@
         <div id="results" hidden>
           <div class="result-heading">
             <div>
+              <p class="eyebrow">분석 결과 / 01</p>
               <h2><span id="result-symbol">AAPL.US</span></h2>
             </div>
             <p class="as-of">기준일 <strong id="as-of-date">—</strong><br /><span id="source-label">토스증권 일별 종가</span></p>

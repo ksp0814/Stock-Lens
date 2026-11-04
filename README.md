@@ -7,7 +7,7 @@
 Node.js 20.6 이상이 필요합니다.
 
 ```bash
-npm.cmd start
+npm start
 ```
 
 `.env.local`의 `PORT`가 `3100`이면 브라우저에서 `http://localhost:3100`을 엽니다.
@@ -27,10 +27,12 @@ PORT=3100
 테스트:
 
 ```bash
-npm.cmd test
+npm test
 ```
 
-배포 서비스의 시작 명령은 `npm.cmd run start:prod` 또는 `node src/server.js`를 사용합니다. 배포 환경에는 `TOSSINVEST_CLIENT_ID`, `TOSSINVEST_CLIENT_SECRET`, `PORT`를 환경변수로 등록하고 `/health`를 헬스체크 경로로 지정하세요. `.env.local`은 배포하지 않습니다.
+배포 서비스의 시작 명령은 `npm run start:prod` 또는 `node src/server.js`를 사용합니다. 배포 환경에는 `TOSSINVEST_CLIENT_ID`, `TOSSINVEST_CLIENT_SECRET`, `PORT`를 환경변수로 등록하고 `/health`를 헬스체크 경로로 지정하세요. `.env.local`은 배포하지 않습니다.
+
+API 요청 제한은 기본적으로 서버에 직접 접속한 IP를 기준으로 적용합니다. 역방향 프록시 뒤에서 사용자별로 제한하려면 `TRUSTED_PROXY_IPS`에 신뢰하는 프록시의 IP 주소를 쉼표로 구분해 등록하세요. 등록한 프록시가 보낸 `X-Forwarded-For`에서 가장 가까운 사용자 IP를 사용합니다.
 
 ## 입력 형식
 

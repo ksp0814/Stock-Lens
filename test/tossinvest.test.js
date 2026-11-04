@@ -110,6 +110,55 @@ test('issues one token request, caches it, and fetches daily candles', async () 
   assert.equal(candleCall.options.headers.Authorization, 'Bearer token-test');
 });
 
+test('shares one token request across concurrent candle calls', async () => {
+  let tokenRequests = 0;
+  let releaseToken;
+  const tokenGate = new Promise((resolve) => { releaseToken = resolve; });
+  const client = createTossInvestClient({
+    clientId: 'client-test',
+    clientSecret: 'secret-test',
+    fetchImpl: async (url) => {
+      if (String(url).endsWith('/oauth2/token')) {
+        tokenRequests += 1;
+        await tokenGate;
+        return jsonResponse({ access_token: 'token-test', expires_in: 3600 });
+      }
+      return jsonResponse(candleResponse);
+    }
+  });
+
+  const first = client.getDailyCandles('AAPL');
+  const second = client.getDailyCandles('MSFT');
+  await new Promise((resolve) => setImmediate(resolve));
+  const requestsBeforeRelease = tokenRequests;
+  releaseToken();
+  await Promise.all([first, second]);
+  assert.equal(requestsBeforeRelease, 1);
+  assert.equal(tokenRequests, 1);
+});
+
+test('refreshes an expired token for market status requests', async () => {
+  let tokenRequests = 0;
+  let calendarRequests = 0;
+  const client = createTossInvestClient({
+    clientId: 'client-test',
+    clientSecret: 'secret-test',
+    fetchImpl: async (url, options) => {
+      if (String(url).endsWith('/oauth2/token')) {
+        tokenRequests += 1;
+        return jsonResponse({ access_token: `token-${tokenRequests}`, expires_in: 3600 });
+      }
+      calendarRequests += 1;
+      if (options.headers.Authorization === 'Bearer token-1') return jsonResponse({}, 401);
+      return jsonResponse({ result: { today: {} } });
+    }
+  });
+
+  await client.getMarketStatus('AAPL');
+  assert.equal(tokenRequests, 2);
+  assert.equal(calendarRequests, 2);
+});
+
 test('fetches selectable one-minute candles with the generic candle client', async () => {
   let candleUrl = '';
   const client = createTossInvestClient({
@@ -185,6 +234,60 @@ test('resolves a Korean stock name through the cached market universe', async ()
 
   assert.deepEqual(resolved, { symbol: '005930', name: '삼성전자', market: 'KOSPI' });
   assert.equal(calls.filter((url) => url.includes('/api/v1/stocks/all')).length, 2);
+});
+
+test('shares market universe requests across overlapping searches', async () => {
+  let tokenRequests = 0;
+  let infoRequests = 0;
+  let priceRequests = 0;
+  const universeRequests = new Map();
+  let releaseUniverse;
+  const universeGate = new Promise((resolve) => { releaseUniverse = resolve; });
+  let releaseMarketCaps;
+  const marketCapGate = new Promise((resolve) => { releaseMarketCaps = resolve; });
+  const client = createTossInvestClient({
+    clientId: 'client-test',
+    clientSecret: 'secret-test',
+    sleepImpl: async () => {},
+    fetchImpl: async (url) => {
+      const endpoint = String(url);
+      if (endpoint.endsWith('/oauth2/token')) {
+        tokenRequests += 1;
+        return jsonResponse({ access_token: 'token-test', expires_in: 3600 });
+      }
+      if (endpoint.includes('/api/v1/stocks/all')) {
+        const market = new URL(endpoint).searchParams.get('market');
+        universeRequests.set(market, (universeRequests.get(market) ?? 0) + 1);
+        await universeGate;
+        return jsonResponse({ result: market === 'KOSPI' ? [{ symbol: '005930', name: '삼성전자' }] : [] });
+      }
+      if (endpoint.includes('/api/v1/stocks?')) {
+        infoRequests += 1;
+        await marketCapGate;
+        return jsonResponse({ result: [] });
+      }
+      if (endpoint.includes('/api/v1/prices?')) {
+        priceRequests += 1;
+        return jsonResponse({ result: [] });
+      }
+      return jsonResponse({ result: [] });
+    }
+  });
+
+  const first = client.searchStocks('삼성');
+  const second = client.searchStocks('삼성전');
+  await new Promise((resolve) => setImmediate(resolve));
+  releaseUniverse();
+  await new Promise((resolve) => setImmediate(resolve));
+  releaseMarketCaps();
+  const [firstMatches, secondMatches] = await Promise.all([first, second]);
+
+  assert.equal(tokenRequests, 1);
+  assert.deepEqual([...universeRequests], [['KOSPI', 1], ['KOSDAQ', 1]]);
+  assert.equal(infoRequests, 1);
+  assert.equal(priceRequests, 1);
+  assert.equal(firstMatches[0].symbol, '005930');
+  assert.equal(secondMatches[0].symbol, '005930');
 });
 
 test('does not choose arbitrarily when a name has multiple matches', async () => {

@@ -172,9 +172,13 @@ export function createTossInvestClient({
   }
 
   let cachedToken = null;
+  let pendingToken = null;
   let lastUniverseRequestAt = 0;
+  let universeRequestQueue = Promise.resolve();
   const universeCache = new Map();
+  const universeInflight = new Map();
   const marketCapCache = new Map();
+  const marketCapInflight = new Map();
   const sessionOpenCache = new Map();
   const marketStatusCache = new Map();
 
@@ -209,91 +213,131 @@ export function createTossInvestClient({
 
   async function getToken() {
     if (cachedToken && cachedToken.expiresAt > Date.now()) return cachedToken.value;
-    return issueToken();
+    if (!pendingToken) {
+      pendingToken = issueToken().finally(() => {
+        pendingToken = null;
+      });
+    }
+    return pendingToken;
+  }
+
+  async function requestAuthorized(endpoint) {
+    let token = await getToken();
+    const send = (accessToken) => requestWithTimeout(fetchImpl, endpoint, {
+      headers: { Authorization: `Bearer ${accessToken}`, accept: 'application/json' }
+    });
+    let response = await send(token);
+    if (response.status === 401) {
+      if (cachedToken?.value === token) cachedToken = null;
+      token = await getToken();
+      response = await send(token);
+    }
+    return response;
+  }
+
+  function waitForUniverseRequestSlot() {
+    const turn = universeRequestQueue.then(async () => {
+      const waitMilliseconds = Math.max(0, lastUniverseRequestAt + STOCK_UNIVERSE_INTERVAL_MS - Date.now());
+      if (waitMilliseconds > 0) await sleepImpl(waitMilliseconds);
+      lastUniverseRequestAt = Date.now();
+    });
+    universeRequestQueue = turn.catch(() => {});
+    return turn;
   }
 
   async function getStockUniverse(market) {
     const cached = universeCache.get(market);
     if (cached && cached.expiresAt > Date.now()) return cached.stocks;
+    const inflight = universeInflight.get(market);
+    if (inflight) return inflight;
 
-    const elapsed = Date.now() - lastUniverseRequestAt;
-    const waitMilliseconds = Math.max(0, STOCK_UNIVERSE_INTERVAL_MS - elapsed);
-    if (waitMilliseconds > 0) await sleepImpl(waitMilliseconds);
+    const request = (async () => {
+      await getToken();
+      const endpoint = new URL(`${BASE_URL}${STOCK_UNIVERSE_PATH}`);
+      endpoint.searchParams.set('market', market);
+      endpoint.searchParams.set('status', 'ACTIVE');
+      await waitForUniverseRequestSlot();
+      const response = await requestAuthorized(endpoint);
+      const payload = await readJson(response);
 
-    const token = await getToken();
-    const endpoint = new URL(`${BASE_URL}${STOCK_UNIVERSE_PATH}`);
-    endpoint.searchParams.set('market', market);
-    endpoint.searchParams.set('status', 'ACTIVE');
-    lastUniverseRequestAt = Date.now();
-    const response = await requestWithTimeout(fetchImpl, endpoint, {
-      headers: { Authorization: `Bearer ${token}`, accept: 'application/json' }
-    });
-    const payload = await readJson(response);
+      if (!response.ok || !Array.isArray(payload?.result)) {
+        throw new TossInvestError(safeProviderMessage(response.status), response.status);
+      }
 
-    if (!response.ok || !Array.isArray(payload?.result)) {
-      throw new TossInvestError(safeProviderMessage(response.status), response.status);
+      const stocks = payload.result
+        .filter((stock) => typeof stock?.symbol === 'string' && typeof stock?.name === 'string')
+        .map((stock) => ({
+          symbol: stock.symbol,
+          name: stock.name,
+          market: stock.market ?? market,
+          securityType: stock.securityType,
+          isCommonShare: stock.isCommonShare
+        }));
+      universeCache.set(market, { stocks, expiresAt: Date.now() + STOCK_UNIVERSE_TTL_MS });
+      return stocks;
+    })();
+    universeInflight.set(market, request);
+    try {
+      return await request;
+    } finally {
+      universeInflight.delete(market);
+    }
+  }
+
+  async function loadMarketCaps(stocks) {
+    const symbols = stocks.map((stock) => stock.symbol).join(',');
+    const infoEndpoint = new URL(`${BASE_URL}${STOCK_INFO_PATH}`);
+    infoEndpoint.searchParams.set('symbols', symbols);
+    const infoResponse = await requestAuthorized(infoEndpoint);
+    const infoPayload = await readJson(infoResponse);
+    if (!infoResponse.ok || !Array.isArray(infoPayload?.result)) {
+      throw new TossInvestError(safeProviderMessage(infoResponse.status), infoResponse.status);
     }
 
-    const stocks = payload.result
-      .filter((stock) => typeof stock?.symbol === 'string' && typeof stock?.name === 'string')
-      .map((stock) => ({
-        symbol: stock.symbol,
-        name: stock.name,
-        market: stock.market ?? market,
-        securityType: stock.securityType,
-        isCommonShare: stock.isCommonShare
-      }));
-    universeCache.set(market, { stocks, expiresAt: Date.now() + STOCK_UNIVERSE_TTL_MS });
-    return stocks;
+    const priceEndpoint = new URL(`${BASE_URL}${PRICES_PATH}`);
+    priceEndpoint.searchParams.set('symbols', symbols);
+    const priceResponse = await requestAuthorized(priceEndpoint);
+    const pricePayload = await readJson(priceResponse);
+    if (!priceResponse.ok || !Array.isArray(pricePayload?.result)) {
+      throw new TossInvestError(safeProviderMessage(priceResponse.status), priceResponse.status);
+    }
+
+    const infoBySymbol = new Map(infoPayload.result.map((item) => [item.symbol, item]));
+    const priceBySymbol = new Map(pricePayload.result.map((item) => [item.symbol, item]));
+    for (const stock of stocks) {
+      const info = infoBySymbol.get(stock.symbol);
+      const price = priceBySymbol.get(stock.symbol);
+      const sharesOutstanding = Number(info?.sharesOutstanding);
+      const lastPrice = Number(price?.lastPrice);
+      marketCapCache.set(stock.symbol, {
+        marketCap: Number.isFinite(sharesOutstanding) && Number.isFinite(lastPrice)
+          ? sharesOutstanding * lastPrice
+          : null,
+        currency: price?.currency ?? null,
+        expiresAt: Date.now() + MARKET_CAP_TTL_MS
+      });
+    }
   }
 
   async function enrichMarketCaps(stocks) {
     const targets = stocks.slice(0, 200);
     const missing = targets.filter((stock) => {
       const cached = marketCapCache.get(stock.symbol);
-      return !cached || cached.expiresAt <= Date.now();
+      return (!cached || cached.expiresAt <= Date.now()) && !marketCapInflight.has(stock.symbol);
     });
 
     if (missing.length > 0) {
-      const token = await getToken();
-      const symbols = missing.map((stock) => stock.symbol).join(',');
-      const infoEndpoint = new URL(`${BASE_URL}${STOCK_INFO_PATH}`);
-      infoEndpoint.searchParams.set('symbols', symbols);
-      const infoResponse = await requestWithTimeout(fetchImpl, infoEndpoint, {
-        headers: { Authorization: `Bearer ${token}`, accept: 'application/json' }
-      });
-      const infoPayload = await readJson(infoResponse);
-      if (!infoResponse.ok || !Array.isArray(infoPayload?.result)) {
-        throw new TossInvestError(safeProviderMessage(infoResponse.status), infoResponse.status);
-      }
-
-      const priceEndpoint = new URL(`${BASE_URL}${PRICES_PATH}`);
-      priceEndpoint.searchParams.set('symbols', symbols);
-      const priceResponse = await requestWithTimeout(fetchImpl, priceEndpoint, {
-        headers: { Authorization: `Bearer ${token}`, accept: 'application/json' }
-      });
-      const pricePayload = await readJson(priceResponse);
-      if (!priceResponse.ok || !Array.isArray(pricePayload?.result)) {
-        throw new TossInvestError(safeProviderMessage(priceResponse.status), priceResponse.status);
-      }
-
-      const infoBySymbol = new Map(infoPayload.result.map((item) => [item.symbol, item]));
-      const priceBySymbol = new Map(pricePayload.result.map((item) => [item.symbol, item]));
-      for (const stock of missing) {
-        const info = infoBySymbol.get(stock.symbol);
-        const price = priceBySymbol.get(stock.symbol);
-        const sharesOutstanding = Number(info?.sharesOutstanding);
-        const lastPrice = Number(price?.lastPrice);
-        marketCapCache.set(stock.symbol, {
-          marketCap: Number.isFinite(sharesOutstanding) && Number.isFinite(lastPrice)
-            ? sharesOutstanding * lastPrice
-            : null,
-          currency: price?.currency ?? null,
-          expiresAt: Date.now() + MARKET_CAP_TTL_MS
-        });
-      }
+      const request = loadMarketCaps(missing);
+      for (const stock of missing) marketCapInflight.set(stock.symbol, request);
+      const clear = () => {
+        for (const stock of missing) {
+          if (marketCapInflight.get(stock.symbol) === request) marketCapInflight.delete(stock.symbol);
+        }
+      };
+      request.then(clear, clear);
     }
 
+    await Promise.all(new Set(targets.map((stock) => marketCapInflight.get(stock.symbol)).filter(Boolean)));
     return targets.map((stock) => ({
       ...stock,
       marketCap: marketCapCache.get(stock.symbol)?.marketCap ?? null,
@@ -313,17 +357,12 @@ export function createTossInvestClient({
     }
 
     const primaryMarkets = /[가-힣]/.test(query) ? KOREAN_MARKETS : US_MARKETS;
-    const stocks = [];
-    for (const market of primaryMarkets) {
-      stocks.push(...await getStockUniverse(market));
-    }
+    const stocks = (await Promise.all(primaryMarkets.map(getStockUniverse))).flat();
 
     if (stocks.every((stock) => !normalizeSearchQuery(stock.name).includes(normalizedQuery))) {
       const fallbackMarkets = [...KOREAN_MARKETS, ...US_MARKETS]
         .filter((market) => !primaryMarkets.includes(market));
-      for (const market of fallbackMarkets) {
-        stocks.push(...await getStockUniverse(market));
-      }
+      stocks.push(...(await Promise.all(fallbackMarkets.map(getStockUniverse))).flat());
     }
 
     const matches = stocks.filter((stock) => {
@@ -377,25 +416,13 @@ export function createTossInvestClient({
 
     const symbol = normalizeTossSymbol(inputSymbol);
     const normalizedCount = Math.min(Math.max(Number(count) || 1, 1), 200);
-    let token = await getToken();
     const endpoint = new URL(`${BASE_URL}${CANDLE_PATH}`);
     endpoint.searchParams.set('symbol', symbol);
     endpoint.searchParams.set('interval', interval);
     endpoint.searchParams.set('count', String(normalizedCount));
     endpoint.searchParams.set('adjusted', 'true');
 
-    let response = await requestWithTimeout(fetchImpl, endpoint, {
-      headers: { Authorization: `Bearer ${token}`, accept: 'application/json' }
-    });
-
-    if (response.status === 401) {
-      cachedToken = null;
-      token = await issueToken();
-      response = await requestWithTimeout(fetchImpl, endpoint, {
-        headers: { Authorization: `Bearer ${token}`, accept: 'application/json' }
-      });
-    }
-
+    const response = await requestAuthorized(endpoint);
     const payload = await readJson(response);
     if (!response.ok) {
       throw new TossInvestError(safeProviderMessage(response.status), response.status);
@@ -429,11 +456,8 @@ export function createTossInvestClient({
     const cached = marketStatusCache.get(marketCountry);
     if (cached && cached.expiresAt > Date.now()) return cached.value;
 
-    const token = await getToken();
     const endpoint = `${BASE_URL}${MARKET_CALENDAR_PATH}/${marketCountry}`;
-    const response = await requestWithTimeout(fetchImpl, endpoint, {
-      headers: { Authorization: `Bearer ${token}`, accept: 'application/json' }
-    });
+    const response = await requestAuthorized(endpoint);
     const payload = await readJson(response);
     if (!response.ok || !payload?.result) {
       throw new TossInvestError(safeProviderMessage(response.status), response.status);
